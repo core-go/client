@@ -19,10 +19,16 @@ type Config struct {
 	Log            bool          `mapstructure:"log"`
 	Single         bool          `mapstructure:"single"`
 	Duration       string        `mapstructure:"duration"`
-	Bytes          string        `mapstructure:"bytes"`
+	Size           string        `mapstructure:"size"`
 	ResponseStatus string        `mapstructure:"status"`
 	Request        string        `mapstructure:"request"`
 	Response       string        `mapstructure:"response"`
+	Error          string        `mapstructure:"error"`
+	Fields         string        `mapstructure:"fields"`
+}
+
+type FieldConfig struct {
+	Fields *[]string `mapstructure:"fields"`
 }
 
 const (
@@ -32,8 +38,8 @@ const (
 	methodPatch  = "PATCH"
 	methodDelete = "DELETE"
 )
-
-var staticConfig Config
+var fieldConfig FieldConfig
+var conf Config
 var staticClient *http.Client
 
 func SetClient(c *http.Client) {
@@ -41,20 +47,33 @@ func SetClient(c *http.Client) {
 }
 
 func NewClient(c Config) (*http.Client, error) {
+	conf.Log = c.Log
+	conf.Single = c.Single
+	conf.ResponseStatus = c.ResponseStatus
+	conf.Size = c.Size
 	if len(c.Duration) > 0 {
-		staticConfig.Duration = c.Duration
+		conf.Duration = c.Duration
 	} else {
-		staticConfig.Duration = "duration"
+		conf.Duration = "duration"
 	}
 	if len(c.Request) > 0 {
-		staticConfig.Request = c.Request
+		conf.Request = c.Request
 	} else {
-		staticConfig.Request = "request"
+		conf.Request = "request"
 	}
 	if len(c.Response) > 0 {
-		staticConfig.Response = c.Response
+		conf.Response = c.Response
 	} else {
-		staticConfig.Response = "response"
+		conf.Response = "response"
+	}
+	if len(c.Error) > 0 {
+		conf.Error = c.Error
+	} else {
+		conf.Error = "error"
+	}
+	if len(c.Fields) > 0 {
+		fields := strings.Split(c.Fields, ",")
+		fieldConfig.Fields = &fields
 	}
 	if len(c.CertFile) > 0 && len(c.KeyFile) > 0 {
 		return NewTLSClient(c.CertFile, c.KeyFile, c.Timeout)
@@ -259,11 +278,5 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 		er2 := errors.New("503 Service Unavailable")
 		return nil, er2
 	}
-	buf := new(bytes.Buffer)
-	_, er3 := buf.ReadFrom(res.Body)
-	if er3 != nil {
-		return nil, er3
-	}
-	s := buf.String()
-	return json.NewDecoder(strings.NewReader(s)), nil
+	return json.NewDecoder(res.Body), nil
 }
