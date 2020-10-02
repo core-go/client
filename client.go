@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"go.uber.org/zap"
 	"net/http"
 	"strings"
 	"time"
@@ -38,7 +39,16 @@ const (
 	methodPatch  = "PATCH"
 	methodDelete = "DELETE"
 )
+
+const FIELDS = "logFields"
+
+var log *zap.Logger
 var fieldConfig FieldConfig
+
+func SetLogger(logger *zap.Logger) {
+	log = logger
+}
+
 var conf Config
 var staticClient *http.Client
 
@@ -270,13 +280,99 @@ func DoWithClient(ctx context.Context, client *http.Client, method string, url s
 	}
 }
 func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, method string, body *[]byte, headers *map[string]string) (*json.Decoder, error) {
-	res, er1 := Do(ctx, client, url, method, body, headers)
-	if er1 != nil {
-		return nil, er1
+	if conf.Log == true && log != nil {
+		if !conf.Single && len(conf.Request) > 0 && body != nil {
+			fs1 := make([]zap.Field, 0)
+			rq := string(*body)
+			if len(rq) > 0 {
+				f0 := zap.String(conf.Request, rq)
+				fs1 = append(fs1, f0)
+			}
+			fs1 = AppendFields(ctx, fs1)
+			log.Info(method+" "+url, fs1...)
+		}
+		start := time.Now()
+		res, er1 := Do(ctx, client, url, method, body, headers)
+		if er1 != nil {
+			if conf.Single && len(conf.Request) > 0 {
+				fs2 := make([]zap.Field, 0)
+				if body != nil {
+					rq := string(*body)
+					if len(rq) > 0 {
+						f0 := zap.String(conf.Request, rq)
+						fs2 = append(fs2, f0)
+					}
+				}
+				f1 := zap.String(conf.Error, er1.Error())
+				fs2 = append(fs2, f1)
+				fs2 = AppendFields(ctx, fs2)
+				log.Error(method+" "+url, fs2...)
+			}
+			return nil, er1
+		}
+		end := time.Now()
+		fs3 := make([]zap.Field, 0)
+		f1 := zap.Int64(conf.Duration, end.Sub(start).Milliseconds())
+		fs3 = append(fs3, f1)
+		if conf.Single && len(conf.Request) > 0 && body != nil {
+			rq := string(*body)
+			if len(rq) > 0 {
+				f2 := zap.String(conf.Request, rq)
+				fs3 = append(fs3, f2)
+			}
+		}
+		if res.StatusCode == 503 {
+			er2 := errors.New("503 Service Unavailable")
+			return nil, er2
+		}
+		buf := new(bytes.Buffer)
+		_, er3 := buf.ReadFrom(res.Body)
+		if er3 != nil {
+			return nil, er3
+		}
+		s := buf.String()
+		if len(conf.ResponseStatus) > 0 {
+			f3 := zap.Int(conf.ResponseStatus, res.StatusCode)
+			fs3 = append(fs3, f3)
+		}
+		if len(conf.Size) > 0 {
+			f3 := zap.Int64(conf.Size, res.ContentLength)
+			fs3 = append(fs3, f3)
+		}
+		if len(conf.Response) > 0 {
+			f3 := zap.String(conf.Response, s)
+			fs3 = append(fs3, f3)
+		}
+		fs3 = AppendFields(ctx, fs3)
+		log.Info(method+" "+url, fs3...)
+		return json.NewDecoder(strings.NewReader(s)), nil
+	} else {
+		res, er1 := Do(ctx, client, url, method, body, headers)
+		if er1 != nil {
+			return nil, er1
+		}
+		if res.StatusCode == 503 {
+			er2 := errors.New("503 Service Unavailable")
+			return nil, er2
+		}
+		return json.NewDecoder(res.Body), nil
 	}
-	if res.StatusCode == 503 {
-		er2 := errors.New("503 Service Unavailable")
-		return nil, er2
+}
+func AppendFields(ctx context.Context, fields []zap.Field) []zap.Field {
+	if logFields, ok := ctx.Value(FIELDS).(map[string]string); ok {
+		for k, v := range logFields {
+			f := zap.String(k, v)
+			fields = append(fields, f)
+		}
 	}
-	return json.NewDecoder(res.Body), nil
+	if fieldConfig.Fields != nil {
+		cfs := *fieldConfig.Fields
+		for _, k2 := range cfs {
+			if v2, ok := ctx.Value(k2).(string); ok && len(v2) > 0 {
+				f := zap.String(k2, v2)
+				fields = append(fields, f)
+			}
+		}
+	}
+	return fields
 }
