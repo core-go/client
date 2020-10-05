@@ -293,23 +293,6 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 		}
 		start := time.Now()
 		res, er1 := Do(ctx, client, url, method, body, headers)
-		if er1 != nil {
-			if conf.Single && len(conf.Request) > 0 {
-				fs2 := make([]zap.Field, 0)
-				if body != nil {
-					rq := string(*body)
-					if len(rq) > 0 {
-						f0 := zap.String(conf.Request, rq)
-						fs2 = append(fs2, f0)
-					}
-				}
-				f1 := zap.String(conf.Error, er1.Error())
-				fs2 = append(fs2, f1)
-				fs2 = AppendFields(ctx, fs2)
-				log.Error(method+" "+url, fs2...)
-			}
-			return nil, er1
-		}
 		end := time.Now()
 		fs3 := make([]zap.Field, 0)
 		f1 := zap.Int64(conf.Duration, end.Sub(start).Milliseconds())
@@ -321,17 +304,31 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 				fs3 = append(fs3, f2)
 			}
 		}
-		if len(conf.Size) > 0 {
-			f3 := zap.Int64(conf.Size, res.ContentLength)
-			fs3 = append(fs3, f3)
+		if er1 != nil {
+			if len(conf.Error) > 0 {
+				f3 := zap.String(conf.Error, er1.Error())
+				fs3 = append(fs3, f3)
+			}
+			fs3 = AppendFields(ctx, fs3)
+			log.Error(method+" "+url, fs3...)
+			return nil, er1
 		}
 		if len(conf.ResponseStatus) > 0 {
 			f3 := zap.Int(conf.ResponseStatus, res.StatusCode)
 			fs3 = append(fs3, f3)
 		}
+		if len(conf.Size) > 0 {
+			f3 := zap.Int64(conf.Size, res.ContentLength)
+			fs3 = append(fs3, f3)
+		}
 		buf := new(bytes.Buffer)
 		_, er3 := buf.ReadFrom(res.Body)
 		if er3 != nil {
+			if len(conf.Error) > 0 {
+				f3 := zap.String(conf.Error, er3.Error())
+				fs3 = append(fs3, f3)
+			}
+			fs3 = AppendFields(ctx, fs3)
 			log.Error(method+" "+url, fs3...)
 			return nil, er3
 		}
