@@ -321,29 +321,31 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 				fs3 = append(fs3, f2)
 			}
 		}
-		if res.StatusCode == 503 {
-			er2 := errors.New("503 Service Unavailable")
-			return nil, er2
-		}
-		buf := new(bytes.Buffer)
-		_, er3 := buf.ReadFrom(res.Body)
-		if er3 != nil {
-			return nil, er3
-		}
-		s := buf.String()
-		if len(conf.ResponseStatus) > 0 {
-			f3 := zap.Int(conf.ResponseStatus, res.StatusCode)
-			fs3 = append(fs3, f3)
-		}
 		if len(conf.Size) > 0 {
 			f3 := zap.Int64(conf.Size, res.ContentLength)
 			fs3 = append(fs3, f3)
 		}
+		if len(conf.ResponseStatus) > 0 {
+			f3 := zap.Int(conf.ResponseStatus, res.StatusCode)
+			fs3 = append(fs3, f3)
+		}
+		buf := new(bytes.Buffer)
+		_, er3 := buf.ReadFrom(res.Body)
+		if er3 != nil {
+			log.Error(method+" "+url, fs3...)
+			return nil, er3
+		}
+		s := buf.String()
 		if len(conf.Response) > 0 {
 			f3 := zap.String(conf.Response, s)
 			fs3 = append(fs3, f3)
 		}
 		fs3 = AppendFields(ctx, fs3)
+		if res.StatusCode == 503 {
+			log.Error(method+" "+url, fs3...)
+			er2 := errors.New("503 Service Unavailable")
+			return nil, er2
+		}
 		log.Info(method+" "+url, fs3...)
 		return json.NewDecoder(strings.NewReader(s)), nil
 	} else {
