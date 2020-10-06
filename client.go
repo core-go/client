@@ -26,10 +26,11 @@ type Config struct {
 	Response       string        `mapstructure:"response"`
 	Error          string        `mapstructure:"error"`
 	Fields         string        `mapstructure:"fields"`
+	FieldMap       string        `mapstructure:"field_map"`
 }
 
 type FieldConfig struct {
-	Fields *[]string `mapstructure:"fields"`
+	Fields   *[]string `mapstructure:"fields"`
 }
 
 const (
@@ -39,8 +40,6 @@ const (
 	methodPatch  = "PATCH"
 	methodDelete = "DELETE"
 )
-
-const FIELDS = "logFields"
 
 var log *logrus.Logger
 var fieldConfig FieldConfig
@@ -61,6 +60,7 @@ func NewClient(c Config) (*http.Client, error) {
 	conf.Single = c.Single
 	conf.ResponseStatus = c.ResponseStatus
 	conf.Size = c.Size
+	conf.FieldMap = c.FieldMap
 	if len(c.Duration) > 0 {
 		conf.Duration = c.Duration
 	} else {
@@ -288,7 +288,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 				fs1[conf.Request] = rq
 			}
 			fs1 = AppendFields(ctx, fs1)
-			log.WithFields(fs1).Info(method+" "+url)
+			log.WithFields(fs1).Info(method + " " + url)
 		}
 		start := time.Now()
 		res, er1 := Do(ctx, client, url, method, body, headers)
@@ -306,7 +306,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 				fs3[conf.Error] = er1.Error()
 			}
 			fs3 = AppendFields(ctx, fs3)
-			log.WithFields(fs3).Error(method+" "+url)
+			log.WithFields(fs3).Error(method + " " + url)
 			return nil, er1
 		}
 		if len(conf.ResponseStatus) > 0 {
@@ -322,7 +322,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 				fs3[conf.Error] = er3.Error()
 			}
 			fs3 = AppendFields(ctx, fs3)
-			log.WithFields(fs3).Error(method+" "+url)
+			log.WithFields(fs3).Error(method + " " + url)
 			return nil, er3
 		}
 		s := buf.String()
@@ -331,12 +331,12 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 		}
 		if res.StatusCode == 503 {
 			fs3 = AppendFields(ctx, fs3)
-			log.WithFields(fs3).Error(method+" "+url)
+			log.WithFields(fs3).Error(method + " " + url)
 			er2 := errors.New("503 Service Unavailable")
 			return nil, er2
 		}
 		fs3 = AppendFields(ctx, fs3)
-		log.WithFields(fs3).Info(method+" "+url)
+		log.WithFields(fs3).Info(method + " " + url)
 		return json.NewDecoder(strings.NewReader(s)), nil
 	} else {
 		res, er1 := Do(ctx, client, url, method, body, headers)
@@ -351,9 +351,11 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 	}
 }
 func AppendFields(ctx context.Context, fields logrus.Fields) logrus.Fields {
-	if logFields, ok := ctx.Value(FIELDS).(map[string]interface{}); ok {
-		for k, v := range logFields {
-			fields[k] = v
+	if len(conf.FieldMap) > 0 {
+		if logFields, ok := ctx.Value(conf.FieldMap).(map[string]interface{}); ok {
+			for k, v := range logFields {
+				fields[k] = v
+			}
 		}
 	}
 	if fieldConfig.Fields != nil {
