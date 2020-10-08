@@ -26,6 +26,7 @@ type Config struct {
 	Response       string        `mapstructure:"response"`
 	Error          string        `mapstructure:"error"`
 	Fields         string        `mapstructure:"fields"`
+	FieldMap       string        `mapstructure:"field_map"`
 }
 
 type FieldConfig struct {
@@ -61,6 +62,7 @@ func NewClient(c Config) (*http.Client, error) {
 	conf.Single = c.Single
 	conf.ResponseStatus = c.ResponseStatus
 	conf.Size = c.Size
+	conf.FieldMap = c.FieldMap
 	if len(c.Duration) > 0 {
 		conf.Duration = c.Duration
 	} else {
@@ -358,10 +360,12 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 	}
 }
 func AppendFields(ctx context.Context, fields []zap.Field) []zap.Field {
-	if logFields, ok := ctx.Value(FIELDS).(map[string]string); ok {
-		for k, v := range logFields {
-			f := zap.String(k, v)
-			fields = append(fields, f)
+	if len(conf.FieldMap) > 0 {
+		if logFields, ok := ctx.Value(conf.FieldMap).(map[string]string); ok {
+			for k, v := range logFields {
+				f := zap.String(k, v)
+				fields = append(fields, f)
+			}
 		}
 	}
 	if fieldConfig.Fields != nil {
