@@ -91,7 +91,7 @@ func NewClient(c Config) (*http.Client, error) {
 		return NewTLSClient(c.CertFile, c.KeyFile, c.Timeout)
 	} else {
 		if c.Timeout > 0 {
-			transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: c.Insecure},}
+			transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: c.Insecure}}
 			client0 := &http.Client{Transport: transport, Timeout: c.Timeout * time.Second}
 			staticClient = client0
 			return client0, nil
@@ -263,23 +263,28 @@ func PatchWithHeaderAndDecode(ctx context.Context, url string, obj interface{}, 
 	er2 := decoder.Decode(result)
 	return er2
 }
-func DoWithClient(ctx context.Context, client *http.Client, method string, url string, obj interface{}, headers *map[string]string) (*json.Decoder, error) {
+func Marshal(obj interface{}) ([]byte, error) {
 	b, ok := obj.([]byte)
 	if ok {
-		return DoAndBuildDecoder(ctx, client, url, method, &b, headers)
-	} else {
-		s, ok2 := obj.(string)
-		if ok2 {
-			b2 := []byte(s)
-			return DoAndBuildDecoder(ctx, client, url, method, &b2, headers)
-		} else {
-			rq, er0 := json.Marshal(obj)
-			if er0 != nil {
-				return nil, er0
-			}
-			return DoAndBuildDecoder(ctx, client, url, method, &rq, headers)
-		}
+		return b, nil
 	}
+	s, ok2 := obj.(string)
+	if ok2 {
+		b2 := []byte(s)
+		return b2, nil
+	}
+	v, er0 := json.Marshal(obj)
+	if er0 != nil {
+		return nil, er0
+	}
+	return v, nil
+}
+func DoWithClient(ctx context.Context, client *http.Client, method string, url string, obj interface{}, headers *map[string]string) (*json.Decoder, error) {
+	rq, err := Marshal(obj)
+	if err != nil {
+		return nil, err
+	}
+	return DoAndBuildDecoder(ctx, client, url, method, &rq, headers)
 }
 func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, method string, body *[]byte, headers *map[string]string) (*json.Decoder, error) {
 	if conf.Log == true && log != nil {
