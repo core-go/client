@@ -6,27 +6,26 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
-	"go.uber.org/zap"
 	"net/http"
 	"strings"
 	"time"
 )
 
 type Config struct {
-	Insecure       bool          `mapstructure:"insecure"`
-	Timeout        time.Duration `mapstructure:"timeout"`
-	CertFile       string        `mapstructure:"cert_file"`
-	KeyFile        string        `mapstructure:"key_file"`
-	Log            bool          `mapstructure:"log"`
-	Single         bool          `mapstructure:"single"`
-	Duration       string        `mapstructure:"duration"`
-	Size           string        `mapstructure:"size"`
-	ResponseStatus string        `mapstructure:"status"`
-	Request        string        `mapstructure:"request"`
-	Response       string        `mapstructure:"response"`
-	Error          string        `mapstructure:"error"`
-	Fields         string        `mapstructure:"fields"`
-	FieldMap       string        `mapstructure:"field_map"`
+	Insecure       bool   `mapstructure:"insecure" json:"insecure,omitempty" gorm:"column:insecure" bson:"insecure,omitempty" dynamodbav:"insecure,omitempty" firestore:"insecure,omitempty"`
+	Timeout        int64  `mapstructure:"timeout" json:"timeout,omitempty" gorm:"column:timeout" bson:"timeout,omitempty" dynamodbav:"timeout,omitempty" firestore:"timeout,omitempty"`
+	CertFile       string `mapstructure:"cert_file" json:"certFile,omitempty" gorm:"column:certfile" bson:"certFile,omitempty" dynamodbav:"certFile,omitempty" firestore:"certFile,omitempty"`
+	KeyFile        string `mapstructure:"key_file" json:"keyFile,omitempty" gorm:"column:keyFile" bson:"keyFile,omitempty" dynamodbav:"keyFile,omitempty" firestore:"keyFile,omitempty"`
+	Log            bool   `mapstructure:"log" json:"log,omitempty" gorm:"column:log" bson:"log,omitempty" dynamodbav:"log,omitempty" firestore:"log,omitempty"`
+	Single         bool   `mapstructure:"single" json:"single,omitempty" gorm:"column:single" bson:"single,omitempty" dynamodbav:"single,omitempty" firestore:"single,omitempty"`
+	Duration       string `mapstructure:"duration" json:"duration,omitempty" gorm:"column:duration" bson:"duration,omitempty" dynamodbav:"duration,omitempty" firestore:"duration,omitempty"`
+	Size           string `mapstructure:"size" json:"size,omitempty" gorm:"column:size" bson:"size,omitempty" dynamodbav:"size,omitempty" firestore:"size,omitempty"`
+	ResponseStatus string `mapstructure:"status" json:"status,omitempty" gorm:"column:status" bson:"status,omitempty" dynamodbav:"status,omitempty" firestore:"status,omitempty"`
+	Request        string `mapstructure:"request" json:"request,omitempty" gorm:"column:request" bson:"request,omitempty" dynamodbav:"request,omitempty" firestore:"request,omitempty"`
+	Response       string `mapstructure:"response" json:"response,omitempty" gorm:"column:response" bson:"response,omitempty" dynamodbav:"response,omitempty" firestore:"response,omitempty"`
+	Error          string `mapstructure:"error" json:"error,omitempty" gorm:"column:error" bson:"error,omitempty" dynamodbav:"error,omitempty" firestore:"error,omitempty"`
+	Fields         string `mapstructure:"fields" json:"fields,omitempty" gorm:"column:fields" bson:"fields,omitempty" dynamodbav:"fields,omitempty" firestore:"fields,omitempty"`
+	FieldMap       string `mapstructure:"field_map" json:"fieldMap,omitempty" gorm:"column:fieldMap" bson:"fieldMap,omitempty" dynamodbav:"fieldMap,omitempty" firestore:"fieldMap,omitempty"`
 }
 
 type FieldConfig struct {
@@ -41,14 +40,7 @@ const (
 	methodDelete = "DELETE"
 )
 
-const FIELDS = "logFields"
-
-var log *zap.Logger
 var fieldConfig FieldConfig
-
-func SetLogger(logger *zap.Logger) {
-	log = logger
-}
 
 var conf Config
 var staticClient *http.Client
@@ -88,11 +80,11 @@ func NewClient(c Config) (*http.Client, error) {
 		fieldConfig.Fields = &fields
 	}
 	if len(c.CertFile) > 0 && len(c.KeyFile) > 0 {
-		return NewTLSClient(c.CertFile, c.KeyFile, c.Timeout)
+		return NewTLSClient(c.CertFile, c.KeyFile, time.Duration(c.Timeout)*time.Millisecond)
 	} else {
 		if c.Timeout > 0 {
 			transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: c.Insecure}}
-			client0 := &http.Client{Transport: transport, Timeout: c.Timeout * time.Second}
+			client0 := &http.Client{Transport: transport, Timeout: time.Duration(c.Timeout)*time.Millisecond}
 			staticClient = client0
 			return client0, nil
 		} else {
@@ -178,85 +170,85 @@ func DoPut(ctx context.Context, client *http.Client, url string, body []byte, he
 func DoPatch(ctx context.Context, client *http.Client, url string, body []byte, headers *map[string]string) (*http.Response, error) {
 	return Do(ctx, client, url, methodPatch, &body, headers)
 }
-func Get(ctx context.Context, url string) (*json.Decoder, error) {
-	return DoWithClient(ctx, staticClient, methodGet, url, nil, nil)
+func Get(ctx context.Context, url string, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+	return DoWithClient(ctx, staticClient, methodGet, url, nil, nil, options...)
 }
-func GetWithHeader(ctx context.Context, url string, headers *map[string]string) (*json.Decoder, error) {
-	return DoWithClient(ctx, staticClient, methodGet, url, nil, headers)
+func GetWithHeader(ctx context.Context, url string, headers *map[string]string, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+	return DoWithClient(ctx, staticClient, methodGet, url, nil, headers, options...)
 }
-func GetAndDecode(ctx context.Context, url string, result interface{}) error {
-	return GetWithHeaderAndDecode(ctx, url, nil, nil, result)
+func GetAndDecode(ctx context.Context, url string, result interface{}, options ...func(context.Context, string, map[string]interface{})) error {
+	return GetWithHeaderAndDecode(ctx, url, nil, nil, result, options...)
 }
-func GetWithHeaderAndDecode(ctx context.Context, url string, obj interface{}, headers *map[string]string, result interface{}) error {
-	decoder, er1 := DoWithClient(ctx, staticClient, methodGet, url, obj, headers)
+func GetWithHeaderAndDecode(ctx context.Context, url string, obj interface{}, headers *map[string]string, result interface{}, options ...func(context.Context, string, map[string]interface{})) error {
+	decoder, er1 := DoWithClient(ctx, staticClient, methodGet, url, obj, headers, options...)
 	if er1 != nil {
 		return er1
 	}
 	er2 := decoder.Decode(result)
 	return er2
 }
-func Delete(ctx context.Context, url string) (*json.Decoder, error) {
-	return DoWithClient(ctx, staticClient, methodDelete, url, nil, nil)
+func Delete(ctx context.Context, url string, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+	return DoWithClient(ctx, staticClient, methodDelete, url, nil, nil, options...)
 }
-func DeleteWithHeader(ctx context.Context, url string, headers *map[string]string) (*json.Decoder, error) {
-	return DoWithClient(ctx, staticClient, methodDelete, url, nil, headers)
+func DeleteWithHeader(ctx context.Context, url string, headers *map[string]string, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+	return DoWithClient(ctx, staticClient, methodDelete, url, nil, headers, options...)
 }
-func DeleteAndDecode(ctx context.Context, url string, result interface{}) error {
-	return DeleteWithHeaderAndDecode(ctx, url, nil, nil, result)
+func DeleteAndDecode(ctx context.Context, url string, result interface{}, options ...func(context.Context, string, map[string]interface{})) error {
+	return DeleteWithHeaderAndDecode(ctx, url, nil, nil, result, options...)
 }
-func DeleteWithHeaderAndDecode(ctx context.Context, url string, obj interface{}, headers *map[string]string, result interface{}) error {
-	decoder, er1 := DoWithClient(ctx, staticClient, methodDelete, url, obj, headers)
+func DeleteWithHeaderAndDecode(ctx context.Context, url string, obj interface{}, headers *map[string]string, result interface{}, options ...func(context.Context, string, map[string]interface{})) error {
+	decoder, er1 := DoWithClient(ctx, staticClient, methodDelete, url, obj, headers, options...)
 	if er1 != nil {
 		return er1
 	}
 	er2 := decoder.Decode(result)
 	return er2
 }
-func Post(ctx context.Context, url string, obj interface{}) (*json.Decoder, error) {
-	return DoWithClient(ctx, staticClient, methodPost, url, obj, nil)
+func Post(ctx context.Context, url string, obj interface{}, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+	return DoWithClient(ctx, staticClient, methodPost, url, obj, nil, options...)
 }
-func PostWithHeader(ctx context.Context, url string, obj interface{}, headers *map[string]string) (*json.Decoder, error) {
-	return DoWithClient(ctx, staticClient, methodPost, url, obj, headers)
+func PostWithHeader(ctx context.Context, url string, obj interface{}, headers *map[string]string, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+	return DoWithClient(ctx, staticClient, methodPost, url, obj, headers, options...)
 }
-func PostAndDecode(ctx context.Context, url string, obj interface{}, result interface{}) error {
-	return PostWithHeaderAndDecode(ctx, url, obj, nil, result)
+func PostAndDecode(ctx context.Context, url string, obj interface{}, result interface{}, options ...func(context.Context, string, map[string]interface{})) error {
+	return PostWithHeaderAndDecode(ctx, url, obj, nil, result, options...)
 }
-func PostWithHeaderAndDecode(ctx context.Context, url string, obj interface{}, headers *map[string]string, result interface{}) error {
-	decoder, er1 := DoWithClient(ctx, staticClient, methodPost, url, obj, headers)
+func PostWithHeaderAndDecode(ctx context.Context, url string, obj interface{}, headers *map[string]string, result interface{}, options ...func(context.Context, string, map[string]interface{})) error {
+	decoder, er1 := DoWithClient(ctx, staticClient, methodPost, url, obj, headers, options...)
 	if er1 != nil {
 		return er1
 	}
 	er2 := decoder.Decode(result)
 	return er2
 }
-func Put(ctx context.Context, url string, obj interface{}) (*json.Decoder, error) {
-	return DoWithClient(ctx, staticClient, methodPut, url, obj, nil)
+func Put(ctx context.Context, url string, obj interface{}, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+	return DoWithClient(ctx, staticClient, methodPut, url, obj, nil, options...)
 }
-func PutWithHeader(ctx context.Context, url string, obj interface{}, headers *map[string]string) (*json.Decoder, error) {
-	return DoWithClient(ctx, staticClient, methodPut, url, obj, headers)
+func PutWithHeader(ctx context.Context, url string, obj interface{}, headers *map[string]string, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+	return DoWithClient(ctx, staticClient, methodPut, url, obj, headers, options...)
 }
-func PutAndDecode(ctx context.Context, url string, obj interface{}, result interface{}) error {
-	return PutWithHeaderAndDecode(ctx, url, obj, nil, result)
+func PutAndDecode(ctx context.Context, url string, obj interface{}, result interface{}, options ...func(context.Context, string, map[string]interface{})) error {
+	return PutWithHeaderAndDecode(ctx, url, obj, nil, result, options...)
 }
-func PutWithHeaderAndDecode(ctx context.Context, url string, obj interface{}, headers *map[string]string, result interface{}) error {
-	decoder, er1 := DoWithClient(ctx, staticClient, methodPut, url, obj, headers)
+func PutWithHeaderAndDecode(ctx context.Context, url string, obj interface{}, headers *map[string]string, result interface{}, options ...func(context.Context, string, map[string]interface{})) error {
+	decoder, er1 := DoWithClient(ctx, staticClient, methodPut, url, obj, headers, options...)
 	if er1 != nil {
 		return er1
 	}
 	er2 := decoder.Decode(result)
 	return er2
 }
-func Patch(ctx context.Context, url string, obj interface{}) (*json.Decoder, error) {
-	return DoWithClient(ctx, staticClient, methodPatch, url, obj, nil)
+func Patch(ctx context.Context, url string, obj interface{}, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+	return DoWithClient(ctx, staticClient, methodPatch, url, obj, nil, options...)
 }
-func PatchWithHeader(ctx context.Context, url string, obj interface{}, headers *map[string]string) (*json.Decoder, error) {
-	return DoWithClient(ctx, staticClient, methodPatch, url, obj, headers)
+func PatchWithHeader(ctx context.Context, url string, obj interface{}, headers *map[string]string, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+	return DoWithClient(ctx, staticClient, methodPatch, url, obj, headers, options...)
 }
-func PatchAndDecode(ctx context.Context, url string, obj interface{}, result interface{}) error {
-	return PatchWithHeaderAndDecode(ctx, url, obj, nil, result)
+func PatchAndDecode(ctx context.Context, url string, obj interface{}, result interface{}, options ...func(context.Context, string, map[string]interface{})) error {
+	return PatchWithHeaderAndDecode(ctx, url, obj, nil, result, options...)
 }
-func PatchWithHeaderAndDecode(ctx context.Context, url string, obj interface{}, headers *map[string]string, result interface{}) error {
-	decoder, er1 := DoWithClient(ctx, staticClient, methodPatch, url, obj, headers)
+func PatchWithHeaderAndDecode(ctx context.Context, url string, obj interface{}, headers *map[string]string, result interface{}, options ...func(context.Context, string, map[string]interface{})) error {
+	decoder, er1 := DoWithClient(ctx, staticClient, methodPatch, url, obj, headers, options...)
 	if er1 != nil {
 		return er1
 	}
@@ -279,78 +271,70 @@ func Marshal(obj interface{}) ([]byte, error) {
 	}
 	return v, nil
 }
-func DoWithClient(ctx context.Context, client *http.Client, method string, url string, obj interface{}, headers *map[string]string) (*json.Decoder, error) {
+func DoWithClient(ctx context.Context, client *http.Client, method string, url string, obj interface{}, headers *map[string]string, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
 	rq, err := Marshal(obj)
 	if err != nil {
 		return nil, err
 	}
-	return DoAndBuildDecoder(ctx, client, url, method, &rq, headers)
+	return DoAndBuildDecoder(ctx, client, url, method, &rq, headers, options...)
 }
-func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, method string, body *[]byte, headers *map[string]string) (*json.Decoder, error) {
-	if conf.Log == true && log != nil {
+func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, method string, body *[]byte, headers *map[string]string, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+	var logInfo func(context.Context, string, map[string]interface{})
+	if len(options) > 0 {
+		logInfo = options[0]
+	}
+	if conf.Log == true && logInfo != nil {
 		if !conf.Single && len(conf.Request) > 0 && body != nil {
-			fs1 := make([]zap.Field, 0)
+			fs1 := make(map[string]interface{}, 0)
 			rq := string(*body)
 			if len(rq) > 0 {
-				f0 := zap.String(conf.Request, rq)
-				fs1 = append(fs1, f0)
+				fs1[conf.Request] = rq
 			}
-			fs1 = AppendFields(ctx, fs1)
-			log.Info(method+" "+url, fs1...)
+			logInfo(ctx, method+" "+url, fs1)
 		}
 		start := time.Now()
 		res, er1 := Do(ctx, client, url, method, body, headers)
 		end := time.Now()
-		fs3 := make([]zap.Field, 0)
-		f1 := zap.Int64(conf.Duration, end.Sub(start).Milliseconds())
-		fs3 = append(fs3, f1)
+		fs3 := make(map[string]interface{}, 0)
+		fs3[conf.Duration] = end.Sub(start).Milliseconds()
 		if conf.Single && len(conf.Request) > 0 && body != nil {
 			rq := string(*body)
 			if len(rq) > 0 {
-				f2 := zap.String(conf.Request, rq)
-				fs3 = append(fs3, f2)
+				fs3[conf.Request] = rq
 			}
 		}
 		if er1 != nil {
 			if len(conf.Error) > 0 {
-				f3 := zap.String(conf.Error, er1.Error())
-				fs3 = append(fs3, f3)
+				fs3[conf.Error] = er1.Error()
 			}
-			fs3 = AppendFields(ctx, fs3)
-			log.Error(method+" "+url, fs3...)
+			logInfo(ctx, method+" "+url, fs3)
 			return nil, er1
 		}
 		if len(conf.ResponseStatus) > 0 {
-			f3 := zap.Int(conf.ResponseStatus, res.StatusCode)
-			fs3 = append(fs3, f3)
+			fs3[conf.ResponseStatus] = res.StatusCode
 		}
 		if len(conf.Size) > 0 {
-			f3 := zap.Int64(conf.Size, res.ContentLength)
-			fs3 = append(fs3, f3)
+			fs3[conf.Size] = res.ContentLength
 		}
 		buf := new(bytes.Buffer)
 		_, er3 := buf.ReadFrom(res.Body)
 		if er3 != nil {
 			if len(conf.Error) > 0 {
-				f3 := zap.String(conf.Error, er3.Error())
-				fs3 = append(fs3, f3)
+				fs3[conf.Error] = er3.Error()
 			}
-			fs3 = AppendFields(ctx, fs3)
-			log.Error(method+" "+url, fs3...)
+			logInfo(ctx, method+" "+url, fs3)
 			return nil, er3
 		}
 		s := buf.String()
 		if len(conf.Response) > 0 {
-			f3 := zap.String(conf.Response, s)
-			fs3 = append(fs3, f3)
+			fs3[conf.Response] = s
 		}
-		fs3 = AppendFields(ctx, fs3)
 		if res.StatusCode == 503 {
-			log.Error(method+" "+url, fs3...)
+			logInfo(ctx, method+" "+url, fs3)
 			er2 := errors.New("503 Service Unavailable")
 			return nil, er2
 		}
-		log.Info(method+" "+url, fs3...)
+		logInfo(ctx, method+" "+url, fs3)
 		return json.NewDecoder(strings.NewReader(s)), nil
 	} else {
 		res, er1 := Do(ctx, client, url, method, body, headers)
@@ -363,24 +347,4 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 		}
 		return json.NewDecoder(res.Body), nil
 	}
-}
-func AppendFields(ctx context.Context, fields []zap.Field) []zap.Field {
-	if len(conf.FieldMap) > 0 {
-		if logFields, ok := ctx.Value(conf.FieldMap).(map[string]string); ok {
-			for k, v := range logFields {
-				f := zap.String(k, v)
-				fields = append(fields, f)
-			}
-		}
-	}
-	if fieldConfig.Fields != nil {
-		cfs := *fieldConfig.Fields
-		for _, k2 := range cfs {
-			if v2, ok := ctx.Value(k2).(string); ok && len(v2) > 0 {
-				f := zap.String(k2, v2)
-				fields = append(fields, f)
-			}
-		}
-	}
-	return fields
 }
