@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
 	"strings"
 	"time"
 )
@@ -491,5 +492,92 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 			return nil, er2
 		}
 		return json.NewDecoder(res.Body), nil
+	}
+}
+
+func DoAndLog(ctx context.Context, client *http.Client, url string, method string, body []byte, headers map[string]string, conf *LogConfig, options ...func(context.Context, string, map[string]interface{})) (*http.Response, error) {
+	var logInfo func(context.Context, string, map[string]interface{})
+	if len(options) > 0 {
+		logInfo = options[0]
+	}
+	if conf != nil && conf.Log == true && logInfo != nil {
+		canRequest := false
+		if method != "GET" && method != "DELETE" && method != "OPTIONS" {
+			canRequest = true
+		}
+		if conf.Separate && len(conf.Request) > 0 && body != nil && canRequest {
+			fs1 := make(map[string]interface{}, 0)
+			rq := string(body)
+			if len(rq) > 0 {
+				fs1[conf.Request] = rq
+			}
+			logInfo(ctx, method+" "+url, fs1)
+		}
+		start := time.Now()
+		res, er1 := DoJSON(ctx, client, url, method, body, headers)
+		end := time.Now()
+		fs3 := make(map[string]interface{}, 0)
+		fs3[conf.Duration] = end.Sub(start).Milliseconds()
+		if !conf.Separate && len(conf.Request) > 0 && body != nil && canRequest {
+			rq := string(body)
+			if len(rq) > 0 {
+				fs3[conf.Request] = rq
+			}
+		}
+		if er1 != nil {
+			if len(conf.Error) > 0 {
+				fs3[conf.Error] = er1.Error()
+			}
+			logInfo(ctx, method+" "+url, fs3)
+			return res, er1
+		}
+		if len(conf.ResponseStatus) > 0 {
+			fs3[conf.ResponseStatus] = res.StatusCode
+		}
+		if len(conf.Size) > 0 && res.ContentLength > 0 {
+			fs3[conf.Size] = res.ContentLength
+		}
+		if len(conf.Response) > 0 {
+			dump, er3 := httputil.DumpResponse(res, true)
+			if er3 != nil {
+				if len(conf.Error) > 0 {
+					fs3[conf.Error] = er3.Error()
+				}
+				logInfo(ctx, method+" "+url, fs3)
+				return res, er3
+			}
+			s := string(dump)
+			if len(conf.Size) > 0 {
+				fs3[conf.Size] = len(s)
+			}
+			if len(conf.Response) > 0 {
+				fs3[conf.Response] = s
+			}
+			if res.StatusCode == 503 {
+				logInfo(ctx, method+" "+url, fs3)
+				er2 := errors.New("503 Service Unavailable")
+				return res, er2
+			}
+			logInfo(ctx, method+" "+url, fs3)
+			return res, nil
+		} else {
+			if res.StatusCode == 503 {
+				logInfo(ctx, method+" "+url, fs3)
+				er2 := errors.New("503 Service Unavailable")
+				return res, er2
+			}
+			logInfo(ctx, method+" "+url, fs3)
+			return res, nil
+		}
+	} else {
+		res, er1 := DoJSON(ctx, client, url, method, body, headers)
+		if er1 != nil {
+			return nil, er1
+		}
+		if res.StatusCode == 503 {
+			er2 := errors.New("503 Service Unavailable")
+			return res, er2
+		}
+		return res, nil
 	}
 }

@@ -12,7 +12,21 @@ Import:
 ```go
 import "github.com/core-go/client"
 ```
- 
+## Features
+### Initialize http client from config
+- Initialize client for http
+- Initialize client for https
+### Log request, response at client
+Support to turn on, turn off
+- request
+- response
+- duration
+- http response status code
+- response content length
+
+### Benefits
+- Do not need to re-compile the service, user can switch client from http to https
+- Do not need to re-compile the service, user can turn on, turn off the log (request, response, duration, response content length...)
 ### Microservice Architect
 ![Microservice Architect](https://camo.githubusercontent.com/cf46a1780520d3612f1d81b219b56a14428fc24bb4ae9f4eede169aa9c58bee8/68747470733a2f2f63646e2d696d616765732d312e6d656469756d2e636f6d2f6d61782f3830302f312a764b6565504f5f5543373369377466796d536d594e412e706e67)
 
