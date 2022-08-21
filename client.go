@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"io/ioutil"
 	"net/http"
 	"net/http/httputil"
@@ -57,11 +56,12 @@ type LogConfig struct {
 	Error          string `yaml:"error" mapstructure:"error" json:"error,omitempty" gorm:"column:error" bson:"error,omitempty" dynamodbav:"error,omitempty" firestore:"error,omitempty"`
 }
 type Params struct {
-	Client *http.Client
-	Url    string
-	Header map[string]string
-	Config *LogConfig
-	Log    func(context.Context, string, map[string]interface{})
+	Client   *http.Client
+	Url      string
+	Header   map[string]string
+	Config   *LogConfig
+	LogError func(context.Context, string, map[string]interface{})
+	LogInfo  func(context.Context, string, map[string]interface{})
 }
 
 const (
@@ -111,22 +111,30 @@ func InitializeParams(config ClientConfig, opts ...func(context.Context, string,
 	if err != nil {
 		return nil, err
 	}
-	var log func(context.Context, string, map[string]interface{})
+	var logError func(context.Context, string, map[string]interface{})
+	var logInfo func(context.Context, string, map[string]interface{})
 	if len(opts) > 0 && opts[0] != nil {
-		log = opts[0]
+		logError = opts[0]
 	}
-	return &Params{Client: c, Url: config.Endpoint.Url, Header: header, Config: conf, Log: log}, nil
+	if len(opts) > 1 && opts[1] != nil {
+		logInfo = opts[1]
+	}
+	return &Params{Client: c, Url: config.Endpoint.Url, Header: header, Config: conf, LogError: logError, LogInfo: logInfo}, nil
 }
 func InitParams(config ClientConf, opts ...func(context.Context, string, map[string]interface{})) (*Params, error) {
 	c, header, conf, err := InitClient(config)
 	if err != nil {
 		return nil, err
 	}
-	var log func(context.Context, string, map[string]interface{})
+	var logError func(context.Context, string, map[string]interface{})
+	var logInfo func(context.Context, string, map[string]interface{})
 	if len(opts) > 0 && opts[0] != nil {
-		log = opts[0]
+		logError = opts[0]
 	}
-	return &Params{Client: c, Url: config.Endpoint.Url, Header: header, Config: conf, Log: log}, nil
+	if len(opts) > 1 && opts[1] != nil {
+		logInfo = opts[1]
+	}
+	return &Params{Client: c, Url: config.Endpoint.Url, Header: header, Config: conf, LogError: logError, LogInfo: logInfo}, nil
 }
 func InitializeClient(config ClientConfig) (*http.Client, map[string]string, *LogConfig, error) {
 	e := config.Endpoint
@@ -408,9 +416,80 @@ func DoWithClient(ctx context.Context, client *http.Client, method string, url s
 	return DoAndBuildDecoder(ctx, client, url, method, rq, headers, conf, options...)
 }
 func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, method string, body []byte, headers map[string]string, conf *LogConfig, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+	var logError func(context.Context, string, map[string]interface{})
 	var logInfo func(context.Context, string, map[string]interface{})
 	if len(options) > 0 {
-		logInfo = options[0]
+		logError = options[0]
+	}
+	if len(options) > 1 {
+		logInfo = options[1]
+	}
+	start := time.Now()
+	res, er1 := DoJSON(ctx, client, url, method, body, headers)
+	end := time.Now()
+	if logError != nil && (er1 != nil || res.StatusCode >= 400) {
+		fs3 := make(map[string]interface{}, 0)
+		var c2 LogConfig
+		if conf != nil {
+			c2 = *conf
+		} else {
+			c2.Duration = "duration"
+			c2.Request = "request"
+			c2.Response = "response"
+			c2.ResponseStatus = "status"
+			c2.Error = "error"
+		}
+		if body != nil {
+			rq := string(body)
+			if len(rq) > 0 {
+				fs3[c2.Request] = rq
+			}
+		}
+		if er1 != nil {
+			if len(c2.Error) > 0 {
+				fs3[c2.Error] = er1.Error()
+			}
+			logError(ctx, method+" "+url, fs3)
+			return nil, er1
+		}
+		if len(c2.ResponseStatus) > 0 {
+			fs3[c2.ResponseStatus] = res.StatusCode
+		}
+		if len(c2.Size) > 0 && res.ContentLength > 0 {
+			fs3[c2.Size] = res.ContentLength
+		}
+		if len(c2.Response) > 0 {
+			dump, er3 := httputil.DumpResponse(res, true)
+			if er3 != nil {
+				if len(c2.Error) > 0 {
+					fs3[c2.Error] = er3.Error()
+				}
+				logError(ctx, method+" "+url, fs3)
+				return nil, er3
+			}
+			s := string(dump)
+			if len(c2.Size) > 0 {
+				fs3[c2.Size] = len(s)
+			}
+			if len(c2.Response) > 0 {
+				fs3[c2.Response] = s
+			}
+			if res.StatusCode == 503 {
+				logError(ctx, method+" "+url, fs3)
+				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+				return nil, er2
+			}
+			logError(ctx, method+" "+url, fs3)
+			return json.NewDecoder(strings.NewReader(s)), nil
+		} else {
+			if res.StatusCode == 503 {
+				logError(ctx, method+" "+url, fs3)
+				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+				return nil, er2
+			}
+			logError(ctx, method+" "+url, fs3)
+			return json.NewDecoder(res.Body), nil
+		}
 	}
 	if conf != nil && conf.Log == true && logInfo != nil {
 		canRequest := false
@@ -425,9 +504,6 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 			}
 			logInfo(ctx, method+" "+url, fs1)
 		}
-		start := time.Now()
-		res, er1 := DoJSON(ctx, client, url, method, body, headers)
-		end := time.Now()
 		fs3 := make(map[string]interface{}, 0)
 		fs3[conf.Duration] = end.Sub(start).Milliseconds()
 		if !conf.Separate && len(conf.Request) > 0 && body != nil && canRequest {
@@ -468,7 +544,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 			}
 			if res.StatusCode == 503 {
 				logInfo(ctx, method+" "+url, fs3)
-				er2 := errors.New("503 Service Unavailable")
+				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
 				return nil, er2
 			}
 			logInfo(ctx, method+" "+url, fs3)
@@ -476,19 +552,18 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 		} else {
 			if res.StatusCode == 503 {
 				logInfo(ctx, method+" "+url, fs3)
-				er2 := errors.New("503 Service Unavailable")
+				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
 				return nil, er2
 			}
 			logInfo(ctx, method+" "+url, fs3)
 			return json.NewDecoder(res.Body), nil
 		}
 	} else {
-		res, er1 := DoJSON(ctx, client, url, method, body, headers)
 		if er1 != nil {
 			return nil, er1
 		}
 		if res.StatusCode == 503 {
-			er2 := errors.New("503 Service Unavailable")
+			er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
 			return nil, er2
 		}
 		return json.NewDecoder(res.Body), nil
@@ -496,9 +571,80 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 }
 
 func DoAndLog(ctx context.Context, client *http.Client, url string, method string, body []byte, headers map[string]string, conf *LogConfig, options ...func(context.Context, string, map[string]interface{})) (*http.Response, error) {
+	var logError func(context.Context, string, map[string]interface{})
 	var logInfo func(context.Context, string, map[string]interface{})
 	if len(options) > 0 {
-		logInfo = options[0]
+		logError = options[0]
+	}
+	if len(options) > 1 {
+		logInfo = options[1]
+	}
+	start := time.Now()
+	res, er1 := DoJSON(ctx, client, url, method, body, headers)
+	end := time.Now()
+	if logError != nil && (er1 != nil || res.StatusCode >= 400) {
+		fs3 := make(map[string]interface{}, 0)
+		var c2 LogConfig
+		if conf != nil {
+			c2 = *conf
+		} else {
+			c2.Duration = "duration"
+			c2.Request = "request"
+			c2.Response = "response"
+			c2.ResponseStatus = "status"
+			c2.Error = "error"
+		}
+		if body != nil {
+			rq := string(body)
+			if len(rq) > 0 {
+				fs3[c2.Request] = rq
+			}
+		}
+		if er1 != nil {
+			if len(c2.Error) > 0 {
+				fs3[c2.Error] = er1.Error()
+			}
+			logError(ctx, method+" "+url, fs3)
+			return res, er1
+		}
+		if len(c2.ResponseStatus) > 0 {
+			fs3[c2.ResponseStatus] = res.StatusCode
+		}
+		if len(c2.Size) > 0 && res.ContentLength > 0 {
+			fs3[c2.Size] = res.ContentLength
+		}
+		if len(c2.Response) > 0 {
+			dump, er3 := httputil.DumpResponse(res, true)
+			if er3 != nil {
+				if len(c2.Error) > 0 {
+					fs3[c2.Error] = er3.Error()
+				}
+				logError(ctx, method+" "+url, fs3)
+				return res, er3
+			}
+			s := string(dump)
+			if len(c2.Size) > 0 {
+				fs3[c2.Size] = len(s)
+			}
+			if len(c2.Response) > 0 {
+				fs3[c2.Response] = s
+			}
+			if res.StatusCode == 503 {
+				logError(ctx, method+" "+url, fs3)
+				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+				return res, er2
+			}
+			logError(ctx, method+" "+url, fs3)
+			return res, nil
+		} else {
+			if res.StatusCode == 503 {
+				logError(ctx, method+" "+url, fs3)
+				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+				return res, er2
+			}
+			logError(ctx, method+" "+url, fs3)
+			return res, nil
+		}
 	}
 	if conf != nil && conf.Log == true && logInfo != nil {
 		canRequest := false
@@ -513,9 +659,6 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 			}
 			logInfo(ctx, method+" "+url, fs1)
 		}
-		start := time.Now()
-		res, er1 := DoJSON(ctx, client, url, method, body, headers)
-		end := time.Now()
 		fs3 := make(map[string]interface{}, 0)
 		fs3[conf.Duration] = end.Sub(start).Milliseconds()
 		if !conf.Separate && len(conf.Request) > 0 && body != nil && canRequest {
@@ -555,7 +698,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 			}
 			if res.StatusCode == 503 {
 				logInfo(ctx, method+" "+url, fs3)
-				er2 := errors.New("503 Service Unavailable")
+				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
 				return res, er2
 			}
 			logInfo(ctx, method+" "+url, fs3)
@@ -563,21 +706,40 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 		} else {
 			if res.StatusCode == 503 {
 				logInfo(ctx, method+" "+url, fs3)
-				er2 := errors.New("503 Service Unavailable")
+				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
 				return res, er2
 			}
 			logInfo(ctx, method+" "+url, fs3)
 			return res, nil
 		}
 	} else {
-		res, er1 := DoJSON(ctx, client, url, method, body, headers)
 		if er1 != nil {
 			return nil, er1
 		}
 		if res.StatusCode == 503 {
-			er2 := errors.New("503 Service Unavailable")
+			er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
 			return res, er2
 		}
 		return res, nil
 	}
+}
+
+type HttpError struct {
+	StatusCode   int
+	ErrorMessage string
+	RootError    error
+	Url          string
+	Service      string
+}
+
+func NewHttpError(statusCode int, errorMessage string, rootError error, url string) error {
+	return &HttpError{StatusCode: statusCode, ErrorMessage: errorMessage, RootError: rootError, Url: url}
+}
+func (e HttpError) Error() string {
+	return e.ErrorMessage
+}
+
+func IsHttpError(err error) (HttpError, bool) {
+	httpErr, ok := err.(HttpError)
+	return httpErr, ok
 }
