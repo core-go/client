@@ -476,7 +476,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 			}
 			if res.StatusCode == 503 {
 				logError(ctx, method+" "+url, fs3)
-				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url)
 				return nil, er2
 			}
 			logError(ctx, method+" "+url, fs3)
@@ -484,7 +484,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 		} else {
 			if res.StatusCode == 503 {
 				logError(ctx, method+" "+url, fs3)
-				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url)
 				return nil, er2
 			}
 			logError(ctx, method+" "+url, fs3)
@@ -544,7 +544,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 			}
 			if res.StatusCode == 503 {
 				logInfo(ctx, method+" "+url, fs3)
-				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url)
 				return nil, er2
 			}
 			logInfo(ctx, method+" "+url, fs3)
@@ -552,7 +552,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 		} else {
 			if res.StatusCode == 503 {
 				logInfo(ctx, method+" "+url, fs3)
-				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url)
 				return nil, er2
 			}
 			logInfo(ctx, method+" "+url, fs3)
@@ -563,7 +563,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 			return nil, er1
 		}
 		if res.StatusCode == 503 {
-			er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+			er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url)
 			return nil, er2
 		}
 		return json.NewDecoder(res.Body), nil
@@ -631,7 +631,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 			}
 			if res.StatusCode == 503 {
 				logError(ctx, method+" "+url, fs3)
-				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url)
 				return res, er2
 			}
 			logError(ctx, method+" "+url, fs3)
@@ -639,7 +639,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 		} else {
 			if res.StatusCode == 503 {
 				logError(ctx, method+" "+url, fs3)
-				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url)
 				return res, er2
 			}
 			logError(ctx, method+" "+url, fs3)
@@ -698,7 +698,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 			}
 			if res.StatusCode == 503 {
 				logInfo(ctx, method+" "+url, fs3)
-				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url)
 				return res, er2
 			}
 			logInfo(ctx, method+" "+url, fs3)
@@ -706,7 +706,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 		} else {
 			if res.StatusCode == 503 {
 				logInfo(ctx, method+" "+url, fs3)
-				er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url)
 				return res, er2
 			}
 			logInfo(ctx, method+" "+url, fs3)
@@ -717,7 +717,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 			return nil, er1
 		}
 		if res.StatusCode == 503 {
-			er2 := NewHttpError(http.StatusServiceUnavailable, "503 Service Unavailable", er1, url)
+			er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url)
 			return res, er2
 		}
 		return res, nil
@@ -729,17 +729,55 @@ type HttpError struct {
 	ErrorMessage string
 	RootError    error
 	Url          string
+	ErrorType    string
+	ErrorCode    string
 	Service      string
+	Severity     string
 }
 
-func NewHttpError(statusCode int, errorMessage string, rootError error, url string) error {
-	return &HttpError{StatusCode: statusCode, ErrorMessage: errorMessage, RootError: rootError, Url: url}
+func NewHttpError(statusCode int, rootError error, opts ...string) error {
+	err := &HttpError{StatusCode: statusCode, RootError: rootError}
+	if len(opts) > 0 {
+		err.ErrorMessage = opts[0]
+	} else if rootError != nil {
+		err.ErrorMessage = rootError.Error()
+	}
+	if len(opts) > 1 {
+		err.Url = opts[1]
+	}
+	if len(opts) > 2 {
+		err.ErrorType = opts[2]
+	}
+	if len(opts) > 3 {
+		err.ErrorCode = opts[3]
+	}
+	if len(opts) > 4 {
+		err.Service = opts[4]
+	}
+	if len(opts) > 5 {
+		err.Severity = opts[5]
+	} else {
+		err.Severity = "Error"
+	}
+	return err
 }
-func (e HttpError) Error() string {
-	return e.ErrorMessage
+func (e *HttpError) Error() string {
+	if len(e.ErrorMessage) > 0 {
+		return e.ErrorMessage
+	}
+	return e.GetRootError()
 }
-
-func IsHttpError(err error) (HttpError, bool) {
-	httpErr, ok := err.(HttpError)
-	return httpErr, ok
+func (e *HttpError) GetRootError() string {
+	if e.RootError != nil {
+		return e.RootError.Error()
+	}
+	return ""
+}
+func IsHttpError(err error) (*HttpError, bool) {
+	httpErr, ok := err.(*HttpError)
+	if ok {
+		return httpErr, ok
+	} else {
+		return nil, ok
+	}
 }
