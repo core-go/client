@@ -7,6 +7,8 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"net/http/httputil"
@@ -270,6 +272,29 @@ func DoJSON(ctx context.Context, client *http.Client, url string, method string,
 		return AddHeaderAndDoJSON(client, req, headers)
 	}
 }
+func DoJSONAndDecode(ctx context.Context, client *http.Client, url string, method string, body []byte, headers map[string]string, errorStatus int) (*json.Decoder, error) {
+	start := time.Now()
+	response, er1 := DoJSON(ctx, client, url, method, body, headers)
+	end := time.Now()
+	dur := end.Sub(start).Milliseconds()
+	if er1 != nil {
+		return nil, er1
+	}
+	if errorStatus < 0 {
+		res := json.NewDecoder(response.Body)
+		return res, nil
+	}
+	if response.StatusCode >= errorStatus {
+		res, er2 := io.ReadAll(response.Body)
+		var rs string
+		if er2 == nil {
+			rs = string(res)
+		}
+		return nil, NewHttpError(response.StatusCode, nil, dur, fmt.Sprint("Response error with status code: ", response.StatusCode), url, string(body), rs)
+	}
+	res := json.NewDecoder(response.Body)
+	return res, nil
+}
 func AddHeaderAndDoJSON(client *http.Client, req *http.Request, headers map[string]string) (*http.Response, error) {
 	if headers != nil {
 		for k, v := range headers {
@@ -405,6 +430,13 @@ func Marshal(obj interface{}) ([]byte, error) {
 	}
 	return v, nil
 }
+func GetString(obj interface{}) (string, bool) {
+	bs, err := Marshal(obj)
+	if err != nil {
+		return "", false
+	}
+	return string(bs), true
+}
 func DoWithClient(ctx context.Context, client *http.Client, method string, url string, obj interface{}, headers map[string]string, conf *LogConfig, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
 	if client == nil {
 		client = sClient
@@ -427,6 +459,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 	start := time.Now()
 	res, er1 := DoJSON(ctx, client, url, method, body, headers)
 	end := time.Now()
+	dur := end.Sub(start).Milliseconds()
 	if logError != nil && (er1 != nil || res.StatusCode >= 400) {
 		fs3 := make(map[string]interface{}, 0)
 		var c2 LogConfig
@@ -480,7 +513,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 				if body != nil {
 					rq = string(body)
 				}
-				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url, rq, s)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, dur, "503 Service Unavailable", url, rq, s)
 				return nil, er2
 			}
 			logError(ctx, method+" "+url, fs3)
@@ -492,7 +525,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 				if body != nil {
 					rq = string(body)
 				}
-				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url, rq)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, dur, "503 Service Unavailable", url, rq)
 				return nil, er2
 			}
 			logError(ctx, method+" "+url, fs3)
@@ -513,7 +546,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 			logInfo(ctx, method+" "+url, fs1)
 		}
 		fs3 := make(map[string]interface{}, 0)
-		fs3[conf.Duration] = end.Sub(start).Milliseconds()
+		fs3[conf.Duration] = dur
 		if !conf.Separate && len(conf.Request) > 0 && body != nil && canRequest {
 			rq := string(body)
 			if len(rq) > 0 {
@@ -556,7 +589,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 				if body != nil {
 					rq = string(body)
 				}
-				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url, rq)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, dur, "503 Service Unavailable", url, rq)
 				return nil, er2
 			}
 			logInfo(ctx, method+" "+url, fs3)
@@ -568,7 +601,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 				if body != nil {
 					rq = string(body)
 				}
-				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url, rq)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, dur, "503 Service Unavailable", url, rq)
 				return nil, er2
 			}
 			logInfo(ctx, method+" "+url, fs3)
@@ -583,7 +616,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 			if body != nil {
 				rq = string(body)
 			}
-			er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url, rq)
+			er2 := NewHttpError(http.StatusServiceUnavailable, er1, dur, "503 Service Unavailable", url, rq)
 			return nil, er2
 		}
 		return json.NewDecoder(res.Body), nil
@@ -602,6 +635,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 	start := time.Now()
 	res, er1 := DoJSON(ctx, client, url, method, body, headers)
 	end := time.Now()
+	dur := end.Sub(start).Milliseconds()
 	if logError != nil && (er1 != nil || res.StatusCode >= 400) {
 		fs3 := make(map[string]interface{}, 0)
 		var c2 LogConfig
@@ -655,7 +689,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 				if body != nil {
 					rq = string(body)
 				}
-				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url, rq, s)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, dur, "503 Service Unavailable", url, rq, s)
 				return res, er2
 			}
 			logError(ctx, method+" "+url, fs3)
@@ -667,7 +701,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 				if body != nil {
 					rq = string(body)
 				}
-				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url, rq)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, dur, "503 Service Unavailable", url, rq)
 				return res, er2
 			}
 			logError(ctx, method+" "+url, fs3)
@@ -688,7 +722,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 			logInfo(ctx, method+" "+url, fs1)
 		}
 		fs3 := make(map[string]interface{}, 0)
-		fs3[conf.Duration] = end.Sub(start).Milliseconds()
+		fs3[conf.Duration] = dur
 		if !conf.Separate && len(conf.Request) > 0 && body != nil && canRequest {
 			rq := string(body)
 			if len(rq) > 0 {
@@ -730,7 +764,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 				if body != nil {
 					rq = string(body)
 				}
-				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url, rq, s)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, dur, "503 Service Unavailable", url, rq, s)
 				return res, er2
 			}
 			logInfo(ctx, method+" "+url, fs3)
@@ -742,7 +776,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 				if body != nil {
 					rq = string(body)
 				}
-				er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url, rq)
+				er2 := NewHttpError(http.StatusServiceUnavailable, er1, dur, "503 Service Unavailable", url, rq)
 				return res, er2
 			}
 			logInfo(ctx, method+" "+url, fs3)
@@ -757,7 +791,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 			if body != nil {
 				rq = string(body)
 			}
-			er2 := NewHttpError(http.StatusServiceUnavailable, er1, "503 Service Unavailable", url, rq)
+			er2 := NewHttpError(http.StatusServiceUnavailable, er1, dur, "503 Service Unavailable", url, rq)
 			return res, er2
 		}
 		return res, nil
@@ -771,14 +805,15 @@ type HttpError struct {
 	Url          string
 	Request      string
 	Response     string
+	Duration     int64
 	ErrorType    string
 	ErrorCode    string
 	Service      string
 	Severity     string
 }
 
-func NewHttpError(statusCode int, rootError error, opts ...string) error {
-	err := &HttpError{StatusCode: statusCode, RootError: rootError}
+func NewHttpError(statusCode int, rootError error, duration int64, opts ...string) error {
+	err := &HttpError{StatusCode: statusCode, RootError: rootError, Duration: duration}
 	if len(opts) > 0 {
 		err.ErrorMessage = opts[0]
 	} else if rootError != nil {
@@ -804,8 +839,6 @@ func NewHttpError(statusCode int, rootError error, opts ...string) error {
 	}
 	if len(opts) > 7 {
 		err.Severity = opts[7]
-	} else {
-		err.Severity = "Error"
 	}
 	return err
 }
@@ -828,4 +861,37 @@ func IsHttpError(err error) (*HttpError, bool) {
 	} else {
 		return nil, ok
 	}
+}
+func MakeMap(err *HttpError, prefix string) map[string]interface{} {
+	mp := make(map[string]interface{})
+	mp[prefix + "Duration"] = err.Duration
+	mp[prefix + "Status"] = err.StatusCode
+	if len(err.Request) > 0 {
+		mp[prefix + "Request"] = err.Request
+	}
+	if len(err.Response) > 0 {
+		mp[prefix + "Response"] = err.Response
+	}
+	if len(err.Url) > 0 {
+		mp[prefix + "Url"] = err.Url
+	}
+	if len(err.ErrorMessage) > 0 {
+		mp[prefix + "Error"] = err.ErrorMessage
+	}
+	if err.RootError != nil && err.Error() != err.ErrorMessage {
+		mp[prefix + "RootError"] = err.Error()
+	}
+	if len(err.ErrorType) > 0 {
+		mp[prefix + "ErrorType"] = err.ErrorType
+	}
+	if len(err.ErrorCode) > 0 {
+		mp[prefix + "ErrorCode"] = err.ErrorCode
+	}
+	if len(err.Service) > 0 {
+		mp[prefix + "Service"] = err.Service
+	}
+	if len(err.Severity) > 0 {
+		mp[prefix + "Severity"] = err.Severity
+	}
+	return mp
 }
