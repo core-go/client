@@ -256,7 +256,7 @@ func GetTLSClientConfig(clientCert tls.Certificate, options ...string) (*tls.Con
 	return c, nil
 }
 
-func DoJSON(ctx context.Context, client *http.Client, url string, method string, body []byte, headers map[string]string) (*http.Response, error) {
+func DoJSON(ctx context.Context, client *http.Client, method string, url string, body []byte, headers map[string]string) (*http.Response, error) {
 	if body != nil {
 		b := body
 		req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(b))
@@ -272,7 +272,17 @@ func DoJSON(ctx context.Context, client *http.Client, url string, method string,
 		return AddHeaderAndDoJSON(client, req, headers)
 	}
 }
-func DoJSONAndDecode(ctx context.Context, client *http.Client, url string, method string, body []byte, headers map[string]string, errorStatus int) (*json.Decoder, error) {
+func DoJSONWithClient(ctx context.Context, client *http.Client, method string, url string, obj interface{}, headers map[string]string, errorStatus int) (*json.Decoder, error) {
+	if client == nil {
+		client = sClient
+	}
+	rq, err := Marshal(obj)
+	if err != nil {
+		return nil, err
+	}
+	return DoJSONAndDecode(ctx, client, method, url, rq, headers, errorStatus)
+}
+func DoJSONAndDecode(ctx context.Context, client *http.Client, method string, url string, body []byte, headers map[string]string, errorStatus int) (*json.Decoder, error) {
 	start := time.Now()
 	response, er1 := DoJSON(ctx, client, url, method, body, headers)
 	end := time.Now()
@@ -315,19 +325,19 @@ func AddHeaderAndDo(client *http.Client, req *http.Request, headers map[string]s
 	return resp, err
 }
 func DoGet(ctx context.Context, client *http.Client, url string, headers map[string]string) (*http.Response, error) {
-	return DoJSON(ctx, client, url, get, nil, headers)
+	return DoJSON(ctx, client, get, url, nil, headers)
 }
 func DoDelete(ctx context.Context, client *http.Client, url string, headers map[string]string) (*http.Response, error) {
-	return DoJSON(ctx, client, url, delete, nil, headers)
+	return DoJSON(ctx, client, delete, url, nil, headers)
 }
 func DoPost(ctx context.Context, client *http.Client, url string, body []byte, headers map[string]string) (*http.Response, error) {
-	return DoJSON(ctx, client, url, post, body, headers)
+	return DoJSON(ctx, client, post, url, body, headers)
 }
 func DoPut(ctx context.Context, client *http.Client, url string, body []byte, headers map[string]string) (*http.Response, error) {
-	return DoJSON(ctx, client, url, put, body, headers)
+	return DoJSON(ctx, client, put, url, body, headers)
 }
 func DoPatch(ctx context.Context, client *http.Client, url string, body []byte, headers map[string]string) (*http.Response, error) {
-	return DoJSON(ctx, client, url, patch, body, headers)
+	return DoJSON(ctx, client, patch, url, body, headers)
 }
 func GetDecoder(ctx context.Context, client *http.Client, url string, conf *LogConfig, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
 	return DoWithClient(ctx, client, get, url, nil, nil, conf, options...)
@@ -445,9 +455,9 @@ func DoWithClient(ctx context.Context, client *http.Client, method string, url s
 	if err != nil {
 		return nil, err
 	}
-	return DoAndBuildDecoder(ctx, client, url, method, rq, headers, conf, options...)
+	return DoAndBuildDecoder(ctx, client, method, url, rq, headers, conf, options...)
 }
-func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, method string, body []byte, headers map[string]string, conf *LogConfig, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
+func DoAndBuildDecoder(ctx context.Context, client *http.Client, method string, url string, body []byte, headers map[string]string, conf *LogConfig, options ...func(context.Context, string, map[string]interface{})) (*json.Decoder, error) {
 	var logError func(context.Context, string, map[string]interface{})
 	var logInfo func(context.Context, string, map[string]interface{})
 	if len(options) > 0 {
@@ -457,7 +467,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 		logInfo = options[1]
 	}
 	start := time.Now()
-	res, er1 := DoJSON(ctx, client, url, method, body, headers)
+	res, er1 := DoJSON(ctx, client, method, url, body, headers)
 	end := time.Now()
 	dur := end.Sub(start).Milliseconds()
 	if logError != nil && (er1 != nil || res.StatusCode >= 400) {
@@ -623,7 +633,7 @@ func DoAndBuildDecoder(ctx context.Context, client *http.Client, url string, met
 	}
 }
 
-func DoAndLog(ctx context.Context, client *http.Client, url string, method string, body []byte, headers map[string]string, conf *LogConfig, options ...func(context.Context, string, map[string]interface{})) (*http.Response, error) {
+func DoAndLog(ctx context.Context, client *http.Client, method string, url string, body []byte, headers map[string]string, conf *LogConfig, options ...func(context.Context, string, map[string]interface{})) (*http.Response, error) {
 	var logError func(context.Context, string, map[string]interface{})
 	var logInfo func(context.Context, string, map[string]interface{})
 	if len(options) > 0 {
@@ -633,7 +643,7 @@ func DoAndLog(ctx context.Context, client *http.Client, url string, method strin
 		logInfo = options[1]
 	}
 	start := time.Now()
-	res, er1 := DoJSON(ctx, client, url, method, body, headers)
+	res, er1 := DoJSON(ctx, client, method, url, body, headers)
 	end := time.Now()
 	dur := end.Sub(start).Milliseconds()
 	if logError != nil && (er1 != nil || res.StatusCode >= 400) {
