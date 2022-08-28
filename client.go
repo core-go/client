@@ -284,7 +284,7 @@ func DoJSONWithClient(ctx context.Context, client *http.Client, method string, u
 }
 func DoJSONAndDecode(ctx context.Context, client *http.Client, method string, url string, body []byte, headers map[string]string, errorStatus int) (*json.Decoder, error) {
 	start := time.Now()
-	response, er1 := DoJSON(ctx, client, url, method, body, headers)
+	response, er1 := DoJSON(ctx, client, method, url, body, headers)
 	end := time.Now()
 	dur := end.Sub(start).Milliseconds()
 	if er1 != nil {
