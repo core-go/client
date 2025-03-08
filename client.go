@@ -255,7 +255,22 @@ func GetTLSClientConfig(clientCert tls.Certificate, options ...string) (*tls.Con
 	}
 	return c, nil
 }
-
+func DoRequest(ctx context.Context, client *http.Client, method string, url string, body []byte, headers map[string]string) (*http.Response, error) {
+	if body != nil {
+		b := body
+		req, err := http.NewRequestWithContext(ctx, method, url, bytes.NewBuffer(b))
+		if err != nil {
+			return nil, err
+		}
+		return AddHeaderAndDo(client, req, headers)
+	} else {
+		req, err := http.NewRequestWithContext(ctx, method, url, nil)
+		if err != nil {
+			return nil, err
+		}
+		return AddHeaderAndDo(client, req, headers)
+	}
+}
 func DoJSON(ctx context.Context, client *http.Client, method string, url string, body []byte, headers map[string]string) (*http.Response, error) {
 	if body != nil {
 		b := body
@@ -874,34 +889,34 @@ func IsHttpError(err error) (*HttpError, bool) {
 }
 func MakeMap(err *HttpError, prefix string) map[string]interface{} {
 	mp := make(map[string]interface{})
-	mp[prefix + "Duration"] = err.Duration
-	mp[prefix + "Status"] = err.StatusCode
+	mp[prefix+"Duration"] = err.Duration
+	mp[prefix+"Status"] = err.StatusCode
 	if len(err.Request) > 0 {
-		mp[prefix + "Request"] = err.Request
+		mp[prefix+"Request"] = err.Request
 	}
 	if len(err.Response) > 0 {
-		mp[prefix + "Response"] = err.Response
+		mp[prefix+"Response"] = err.Response
 	}
 	if len(err.Url) > 0 {
-		mp[prefix + "Url"] = err.Url
+		mp[prefix+"Url"] = err.Url
 	}
 	if len(err.ErrorMessage) > 0 {
-		mp[prefix + "Error"] = err.ErrorMessage
+		mp[prefix+"Error"] = err.ErrorMessage
 	}
 	if err.RootError != nil && err.Error() != err.ErrorMessage {
-		mp[prefix + "RootError"] = err.Error()
+		mp[prefix+"RootError"] = err.Error()
 	}
 	if len(err.ErrorType) > 0 {
-		mp[prefix + "ErrorType"] = err.ErrorType
+		mp[prefix+"ErrorType"] = err.ErrorType
 	}
 	if len(err.ErrorCode) > 0 {
-		mp[prefix + "ErrorCode"] = err.ErrorCode
+		mp[prefix+"ErrorCode"] = err.ErrorCode
 	}
 	if len(err.Service) > 0 {
-		mp[prefix + "Service"] = err.Service
+		mp[prefix+"Service"] = err.Service
 	}
 	if len(err.Severity) > 0 {
-		mp[prefix + "Severity"] = err.Severity
+		mp[prefix+"Severity"] = err.Severity
 	}
 	return mp
 }
