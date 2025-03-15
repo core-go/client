@@ -9,9 +9,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httputil"
+	"os"
 	"strings"
 	"time"
 )
@@ -245,7 +245,7 @@ func GetTLSClientConfig(clientCert tls.Certificate, options ...string) (*tls.Con
 		MaxVersion:         tls.VersionTLS13,
 	}
 	if len(options) > 0 && len(options[0]) > 0 {
-		pem, err := ioutil.ReadFile(options[0])
+		pem, err := os.ReadFile(options[0])
 		if err != nil {
 			return nil, err
 		}
